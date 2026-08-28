@@ -1,4 +1,4 @@
-# Daly Ventures Racing Intelligence
+# Racing Intelligence
 
 An evidence-governed racing dashboard that separates current publication status from historical performance. It is designed to publish a small, verified board of UK and Irish win-single candidates, reconcile official results, and update performance trends and lessons without treating AI output as the source of truth.
 
