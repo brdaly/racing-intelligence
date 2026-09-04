@@ -1,5 +1,7 @@
 # Racing Intelligence
 
+**Status: Labs/Prototype** — This repository is in active development as a hardened prototype. It demonstrates evidence-governed decision systems with audit trails but is not production-ready for deployment. Authentication, database connectivity, and live data integration must be completed before production use.
+
 An evidence-governed racing dashboard that separates current publication status from historical performance. It is designed to publish a small, verified board of UK and Irish win-single candidates, reconcile official results, and update performance trends and lessons without treating AI output as the source of truth.
 
 The production site is currently owner-only at [daly-racing-intelligence.brendandaly.chatgpt.site](https://daly-racing-intelligence.brendandaly.chatgpt.site). The custom domain `racing.dalyventures.com` is reserved but remains dependent on DNS validation.
@@ -61,10 +63,12 @@ Set `DASHBOARD_UPDATE_TOKEN` in `.env` only when testing the protected update ro
 
 ```bash
 pnpm lint
+pnpm typecheck
+pnpm test
 pnpm build
 ```
 
-GitHub Actions runs both checks for pushes to `main` and pull requests.
+GitHub Actions runs all validation checks for pushes to `main` and pull requests, including security audits.
 
 ## API surface
 
