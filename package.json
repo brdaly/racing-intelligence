@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.19.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brdaly/daly-ventures-racing-intelligence.git"
+    "url": "git+https://github.com/brdaly/racing-intelligence.git"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -17,11 +17,11 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
+    "test": "vitest run --config vitest.config.ts",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "next": "16.2.6",
+    "next": "16.3.4",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "drizzle-orm": "0.45.2"
@@ -37,7 +37,7 @@
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.4",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
