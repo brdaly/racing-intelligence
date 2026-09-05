@@ -37,5 +37,14 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Audit dependencies
+        run: pnpm audit --prod
+
       - name: Build
         run: pnpm build
+
+      - name: Test
+        run: pnpm test
