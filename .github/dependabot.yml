@@ -1,0 +1,47 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Detroit
+    open-pull-requests-limit: 5
+    groups:
+      routine-npm-updates:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/node"
+        update-types:
+          - minor
+          - patch
+      runtime-types:
+        patterns:
+          - "@types/node"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # @types/node major versions require a deliberate Node runtime upgrade.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: America/Detroit
+    open-pull-requests-limit: 5
+    groups:
+      routine-action-updates:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
