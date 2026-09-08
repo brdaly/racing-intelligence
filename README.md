@@ -99,3 +99,8 @@ Production secrets are configured in the hosting environment, never in source co
 ## Responsible-use boundary
 
 This project provides racing analysis and decision support. It is not wagering execution software, does not guarantee outcomes, and must not publish unverified runners, prices, results, or market claims. Singles remain the core decision unit; multiples should only be derived from independently qualified selections.
+
+## License
+
+Source-visible for viewing and evaluation only. See [LICENSE](LICENSE). No
+permission is granted to reuse, redistribute, or commercialize the contents.
