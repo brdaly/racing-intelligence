@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { validatePublishPayload } from '@/lib/publication-validation';
 import { isAuthorized, jsonError } from '@/lib/server-auth';
+import { commitGovernedWrite } from '@/lib/update-runs';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,6 @@ export async function POST(request: Request) {
     const portfolioId = `portfolio:${payload.boardDate}`;
     const snapshotId = crypto.randomUUID();
     const statements: D1PreparedStatement[] = [
-      env.DB.prepare('INSERT INTO update_runs (id, run_type, started_at, status, input_as_of, records_accepted, records_rejected) VALUES (?, ?, ?, ?, ?, 0, 0)').bind(runId, 'board_publish', startedAt, 'running', payload.dataAsOf),
       env.DB.prepare('INSERT OR IGNORE INTO portfolios (id, decision_date, currency, notional_cap_cents, status, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(portfolioId, payload.boardDate, 'USD', payload.notionalCapCents ?? 10000, 'active', startedAt),
       env.DB.prepare("UPDATE board_snapshots SET status = 'superseded' WHERE board_date = ? AND status = 'published'").bind(payload.boardDate),
       env.DB.prepare('INSERT INTO board_snapshots (id, portfolio_id, board_date, version, status, verification_status, data_as_of, published_at, conflict_count, approved_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(snapshotId, portfolioId, payload.boardDate, version, 'published', payload.conflictCount ? 'published_with_disclosed_conflict' : 'verified', payload.dataAsOf, startedAt, payload.conflictCount, payload.approvedBy),
@@ -54,14 +54,18 @@ export async function POST(request: Request) {
     }
     statements.push(
       env.DB.prepare('INSERT INTO publication_events (id, snapshot_id, event_type, event_at, actor, previous_version, change_summary) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(crypto.randomUUID(), snapshotId, 'publish', startedAt, payload.approvedBy, version > 1 ? version - 1 : null, payload.changeSummary),
-      env.DB.prepare('UPDATE update_runs SET completed_at = ?, status = ?, records_accepted = ? WHERE id = ?').bind(new Date().toISOString(), 'succeeded', payload.entries.length, runId),
     );
-    await env.DB.batch(statements);
+    await commitGovernedWrite(env.DB, {
+      runId,
+      runType: 'board_publish',
+      startedAt,
+      inputAsOf: payload.dataAsOf,
+      statements,
+      recordsAccepted: payload.entries.length,
+      errorSummary: 'Database write failed; details withheld.',
+    });
     return Response.json({ snapshot_id: snapshotId, board_version: version, published_at: startedAt, records_accepted: payload.entries.length }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch {
-    try {
-      await env.DB.prepare('UPDATE update_runs SET completed_at = ?, status = ?, records_rejected = 1, error_summary = ? WHERE id = ?').bind(new Date().toISOString(), 'failed', 'Database write failed; details withheld.', runId).run();
-    } catch { /* The database may not be initialized yet. */ }
     return jsonError('Publication failed closed; no board was published.', 503);
   }
 }

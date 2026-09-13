@@ -17,6 +17,8 @@
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit",
+    "audit": "pnpm audit --audit-level high",
+    "audit:prod": "pnpm audit --prod --audit-level high",
     "test": "vitest run --config vitest.config.ts",
     "db:generate": "drizzle-kit generate"
   },

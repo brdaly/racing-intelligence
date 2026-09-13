@@ -3,3 +3,22 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   workerd: true
+# Expressed as version ranges rather than dependency paths (`parent>child`), so
+# they keep matching when a parent's version moves. Each entry tracks a
+# published advisory; drop it once the tree resolves above the patched version
+# on its own.
+overrides:
+  "esbuild@<0.24.3": 0.25.12 # GHSA-67mh-4wv8-2f99
+  "js-yaml@<4.3.2": 4.3.2 # GHSA-2883-xcg3-v3hh
+  "sharp@<0.35.4": 0.35.4
+
+# image-size GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq have no patched
+# release: both name >=2.0.3 and 2.0.2 is the newest published version, so no
+# override can clear them. The package reaches the tree only through vinext's
+# build-time image handling and never runs in the deployed Worker, which
+# `pnpm run audit:prod` confirms independently. Remove these two entries as
+# soon as image-size ships a fix.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-w3rx-r6r6-pgpr
+    - GHSA-5p2g-fcmc-qvqq

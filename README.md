@@ -100,6 +100,11 @@ Production secrets are configured in the hosting environment, never in source co
 
 This project provides racing analysis and decision support. It is not wagering execution software, does not guarantee outcomes, and must not publish unverified runners, prices, results, or market claims. Singles remain the core decision unit; multiples should only be derived from independently qualified selections.
 
+## Security
+
+Report vulnerabilities privately through the process in [SECURITY.md](SECURITY.md).
+Do not open a public issue for a suspected vulnerability.
+
 ## License
 
 Source-visible for viewing and evaluation only. See [LICENSE](LICENSE). No
