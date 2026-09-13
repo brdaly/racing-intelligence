@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: validate-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel main's own validation: each commit on the default branch is
+  # the record that it was checked, and a superseding push must not erase it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   validate:
@@ -43,7 +45,10 @@ jobs:
         run: pnpm typecheck
 
       - name: Audit dependencies
-        run: pnpm audit --prod
+        run: pnpm run audit
+
+      - name: Audit production dependencies
+        run: pnpm run audit:prod
 
       - name: Build
         run: pnpm build

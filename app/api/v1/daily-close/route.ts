@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { isAuthorized, isIsoDate, isShortText, isTimestamp, jsonError } from '@/lib/server-auth';
+import { commitGovernedWrite } from '@/lib/update-runs';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,6 @@ export async function POST(request: Request) {
   const roi = payload.settledStakeCents ? payload.profitLossCents / payload.settledStakeCents : null;
   try {
     const statements: D1PreparedStatement[] = [
-      env.DB.prepare('INSERT INTO update_runs (id, run_type, started_at, status, input_as_of, records_accepted, records_rejected) VALUES (?, ?, ?, ?, ?, 0, 0)').bind(runId, 'daily_close', now, 'running', payload.dataAsOf),
       env.DB.prepare(`
         INSERT INTO daily_performance (date, recommendations, settled, unresolved, settled_stake_cents, gross_return_cents, profit_loss_cents, roi, wins, losses, voids, fully_settled, data_as_of)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -54,12 +54,18 @@ export async function POST(request: Request) {
     }
     statements.push(
       env.DB.prepare('INSERT INTO publication_events (id, snapshot_id, event_type, event_at, actor, change_summary) VALUES (?, NULL, ?, ?, ?, ?)').bind(crypto.randomUUID(), 'daily_close', now, payload.approvedBy, `Daily performance and ${payload.lessons?.length ?? 0} learning records approved for ${payload.date}.`),
-      env.DB.prepare('UPDATE update_runs SET completed_at = ?, status = ?, records_accepted = ? WHERE id = ?').bind(now, 'succeeded', 1 + (payload.lessons?.length ?? 0), runId),
     );
-    await env.DB.batch(statements);
+    await commitGovernedWrite(env.DB, {
+      runId,
+      runType: 'daily_close',
+      startedAt: now,
+      inputAsOf: payload.dataAsOf,
+      statements,
+      recordsAccepted: 1 + (payload.lessons?.length ?? 0),
+      errorSummary: 'Database write failed; details withheld.',
+    });
     return Response.json({ date: payload.date, settled: payload.settled, unresolved: payload.unresolved, roi, lessons_accepted: payload.lessons?.length ?? 0, closed_at: now }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch {
-    try { await env.DB.prepare('UPDATE update_runs SET completed_at = ?, status = ?, records_rejected = 1, error_summary = ? WHERE id = ?').bind(new Date().toISOString(), 'failed', 'Database write failed; details withheld.', runId).run(); } catch { /* Database may not be initialized. */ }
     return jsonError('Daily close failed closed; no statistics were changed.', 503);
   }
 }

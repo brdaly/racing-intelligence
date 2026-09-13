@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { boardEntries, boardMeta } from '@/lib/dashboard-data';
+import { isStaleTimestamp } from '@/lib/freshness';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,9 @@ export async function GET() {
         board_version: snapshot.version,
         schema_version: '1.0.0',
         verification_status: snapshot.verification_status,
-        is_stale: false,
+        // The board is the surface the README's fail-closed claim covers, so
+        // freshness is derived from the snapshot rather than assumed.
+        is_stale: isStaleTimestamp(snapshot.data_as_of),
         unresolved_conflict_count: snapshot.conflict_count,
         source: 'database',
       }, { headers: { 'Cache-Control': 'no-store' } });
