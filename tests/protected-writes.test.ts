@@ -173,13 +173,13 @@ describe('POST /api/v1/publish', () => {
       entries: [entry({ source: { ...(entry().source as object), observedAt: '2026-09-14T12:00:00Z' } })],
     })));
     expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
-      .toBe('2026-09-14T12:00:00Z');
+      .toBe('2026-09-14T12:00:00.000Z');
 
     await publish(post('publish', board({
       entries: [entry({ source: { ...(entry().source as object), observedAt: '2026-09-14T07:00:00Z' } })],
     })));
     expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
-      .toBe('2026-09-14T12:00:00Z');
+      .toBe('2026-09-14T12:00:00.000Z');
   });
 
   it('takes the newest observation in the payload, not the one ranked first', async () => {
@@ -191,7 +191,7 @@ describe('POST /api/v1/publish', () => {
     })));
 
     expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
-      .toBe('2026-09-14T12:00:00Z');
+      .toBe('2026-09-14T12:00:00.000Z');
   });
 
   it('compares observations as instants rather than as strings', async () => {
@@ -207,7 +207,7 @@ describe('POST /api/v1/publish', () => {
     })));
 
     expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
-      .toBe('2026-09-14T12:00:00Z');
+      .toBe('2026-09-14T12:00:00.000Z');
   });
 
   it('fails closed when another publication creates the same meeting between the read and the write', async () => {
@@ -278,6 +278,17 @@ describe('POST /api/v1/publish', () => {
       { region: 'UK|Flat', meeting: 'Ascot' },
     ]);
     expect(database.count('races')).toBe(2);
+  });
+
+  it('stores the observation canonically, whatever format the publisher sent', async () => {
+    await publish(post('publish', board({
+      entries: [entry({ source: { ...(entry().source as object), observedAt: 'Sep 14, 2026 08:30:00 UTC' } })],
+    })));
+
+    // Anything `Date.parse` accepts is publishable, and a value SQLite cannot
+    // read is a value no query — or migration — can order against another.
+    expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
+      .toBe('2026-09-14T08:30:00.000Z');
   });
 
   it('rejects a payload that publishes the same opinion twice rather than failing closed on it', async () => {

@@ -67,9 +67,13 @@ WHERE EXISTS (SELECT 1 FROM races existing WHERE existing.id = race_results.race
 -- holding its place. The later publication's row can carry a corrected outcome,
 -- finish position or official time, and deleting it unread would discard the
 -- correction and keep the obsolete record. The authoritative one is carried onto
--- the survivor first, judged by official time: as an instant where SQLite can
--- parse it, by text and then insertion order only as tiebreaks, because these
--- values are constrained to what the publisher sent and nothing more.
+-- the survivor first.
+--
+-- Chosen by insertion order rather than by official time. A correction can move
+-- `official_at` earlier as readily as later — that column is itself one of the
+-- fields being corrected — so it cannot say which revision is authoritative.
+-- The row written last is the later publication, and that is the only ordering
+-- here that does not depend on the data being corrected.
 --
 -- Where a race has no duplicates this selects the row's own values, so it is a
 -- no-op rather than a special case.
@@ -83,12 +87,47 @@ SET (outcome, finish_position, official_at, source_observation_id) = (
     AND duplicate.post_time = survivor.post_time
     AND duplicate.race_name = survivor.race_name
     AND newest.horse_name = race_results.horse_name
-  ORDER BY julianday(newest.official_at) DESC, newest.official_at DESC, newest.rowid DESC
+  ORDER BY newest.rowid DESC
   LIMIT 1
 )
 WHERE race_id IN (
   SELECT id FROM races
   WHERE rowid IN (SELECT MIN(rowid) FROM races GROUP BY card_id, post_time, race_name)
+);--> statement-breakpoint
+
+-- A source observation records the entity it describes by id, and that pointer
+-- is not the one the statement above copied: carrying `source_observation_id`
+-- onto the survivor leaves the observation itself still naming the result row
+-- about to be deleted. The provenance of the correction would survive in one
+-- direction and dangle in the other, in exactly the case this is meant to keep
+-- whole. Matched by id alone rather than by an `entity_type` string, because
+-- nothing in this repository writes an observation for a result yet and
+-- guessing the value it will use would be worse than matching without it.
+--
+-- `entity_id` is NOT NULL, so a group that somehow has no surviving result
+-- fails the migration rather than writing a dangling row.
+UPDATE source_observations
+SET entity_id = (
+  SELECT survivor.id
+  FROM race_results doomed
+  JOIN races doomed_race ON doomed_race.id = doomed.race_id
+  JOIN races survivor_race
+    ON survivor_race.card_id = doomed_race.card_id
+   AND survivor_race.post_time = doomed_race.post_time
+   AND survivor_race.race_name = doomed_race.race_name
+  JOIN race_results survivor
+    ON survivor.race_id = survivor_race.id
+   AND survivor.horse_name = doomed.horse_name
+  WHERE doomed.id = source_observations.entity_id
+  ORDER BY survivor_race.rowid
+  LIMIT 1
+)
+WHERE entity_id IN (
+  SELECT id FROM race_results
+  WHERE race_id IN (
+    SELECT id FROM races
+    WHERE rowid NOT IN (SELECT MIN(rowid) FROM races GROUP BY card_id, post_time, race_name)
+  )
 );--> statement-breakpoint
 
 DELETE FROM race_results
@@ -101,6 +140,14 @@ WHERE race_id IN (
 -- race sits on the last publication that named it. Keeping the earliest value
 -- would move race freshness backwards, contradicting the monotonic guarantee the
 -- publish route now makes, so the newest is carried across first.
+--
+-- `isTimestamp` accepts any format `Date.parse` understands, so a stored value
+-- need not be one SQLite can read. `julianday` returns NULL for those, and NULL
+-- sorts last under DESC, which would make an ISO value beat a genuinely newer
+-- non-ISO one every time. Where a group mixes the two, no comparison of the
+-- values themselves is available, so the first key collapses to NULL for the
+-- whole group and insertion order decides — the later publication's row. Where
+-- every value is readable, the instants decide, as they should.
 UPDATE races
 SET last_observed_at = (
   SELECT best.last_observed_at
@@ -109,7 +156,16 @@ SET last_observed_at = (
     AND best.post_time = races.post_time
     AND best.race_name = races.race_name
     AND best.last_observed_at IS NOT NULL
-  ORDER BY julianday(best.last_observed_at) DESC, best.last_observed_at DESC
+  ORDER BY
+    CASE WHEN EXISTS (
+      SELECT 1 FROM races unreadable
+      WHERE unreadable.card_id = best.card_id
+        AND unreadable.post_time = best.post_time
+        AND unreadable.race_name = best.race_name
+        AND unreadable.last_observed_at IS NOT NULL
+        AND julianday(unreadable.last_observed_at) IS NULL
+    ) THEN NULL ELSE julianday(best.last_observed_at) END DESC,
+    best.rowid DESC
   LIMIT 1
 )
 WHERE rowid IN (SELECT MIN(rowid) FROM races GROUP BY card_id, post_time, race_name)

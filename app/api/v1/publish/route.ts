@@ -66,15 +66,23 @@ export async function POST(request: Request) {
 
     // `last_observed_at` records the latest observation of a race, so it is
     // taken from the newest entry for that race rather than from whichever one
-    // happens to be ranked first. Compared as instants: `isTimestamp` accepts
-    // any format `Date.parse` understands, so two of them need not sort the
-    // same way as strings.
+    // happens to be ranked first, and compared as an instant: `isTimestamp`
+    // accepts any format `Date.parse` understands, so two of them need not sort
+    // the same way as strings.
+    //
+    // Stored canonically in UTC ISO-8601 for the same reason one step further
+    // out. A value SQLite cannot read is a value no query can order, and a
+    // migration collapsing duplicate races would have no way to tell which of a
+    // mixed pair is newer. `source_observations.observed_at` keeps the
+    // publisher's own text, which is the provenance record; this column is the
+    // one the system compares.
     const latestObservation = new Map<string, string>();
     for (const entry of sortedEntries) {
       const raceKey = keyOf(keyOf(entry.region, entry.track), entry.raceTime, entry.raceName);
       const seen = latestObservation.get(raceKey);
-      if (!seen || Date.parse(entry.source.observedAt) > Date.parse(seen)) {
-        latestObservation.set(raceKey, entry.source.observedAt);
+      const observed = new Date(entry.source.observedAt).toISOString();
+      if (!seen || Date.parse(observed) > Date.parse(seen)) {
+        latestObservation.set(raceKey, observed);
       }
     }
 
