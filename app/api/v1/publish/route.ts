@@ -28,6 +28,12 @@ export async function POST(request: Request) {
     // publication created. Their ids are the identity that results and prior
     // opinions hang off, so a second row for the same race forks the history of
     // that race in two without either half being wrong on its face.
+    // Keys are JSON tuples rather than joined strings. `isShortText` permits
+    // "|" in a region or a meeting, so "UK|Flat" + "Ascot" and "UK" +
+    // "Flat|Ascot" would otherwise collapse to one key, and the second meeting
+    // would reuse the first one's card and hang its races off the wrong track.
+    const keyOf = (...parts: string[]) => JSON.stringify(parts);
+
     const cardIds = new Map<string, string>();
     const raceIds = new Map<string, string>();
     const cardKeysById = new Map<string, string>();
@@ -37,7 +43,7 @@ export async function POST(request: Request) {
       .bind(portfolioId)
       .all<{ id: string; region: string; meeting: string }>();
     for (const card of existingCards.results) {
-      const cardKey = `${card.region}|${card.meeting}`;
+      const cardKey = keyOf(card.region, card.meeting);
       cardIds.set(cardKey, card.id);
       cardKeysById.set(card.id, cardKey);
     }
@@ -52,7 +58,7 @@ export async function POST(request: Request) {
       .all<{ id: string; card_id: string; post_time: string; race_name: string; last_observed_at: string | null }>();
     for (const race of existingRaces.results) {
       const cardKey = cardKeysById.get(race.card_id);
-      if (cardKey) raceIds.set(`${cardKey}|${race.post_time}|${race.race_name}`, race.id);
+      if (cardKey) raceIds.set(keyOf(cardKey, race.post_time, race.race_name), race.id);
       storedObservations.set(race.id, race.last_observed_at);
     }
 
@@ -65,7 +71,7 @@ export async function POST(request: Request) {
     // same way as strings.
     const latestObservation = new Map<string, string>();
     for (const entry of sortedEntries) {
-      const raceKey = `${entry.region}|${entry.track}|${entry.raceTime}|${entry.raceName}`;
+      const raceKey = keyOf(keyOf(entry.region, entry.track), entry.raceTime, entry.raceName);
       const seen = latestObservation.get(raceKey);
       if (!seen || Date.parse(entry.source.observedAt) > Date.parse(seen)) {
         latestObservation.set(raceKey, entry.source.observedAt);
@@ -73,14 +79,14 @@ export async function POST(request: Request) {
     }
 
     for (const entry of sortedEntries) {
-      const cardKey = `${entry.region}|${entry.track}`;
+      const cardKey = keyOf(entry.region, entry.track);
       let cardId = cardIds.get(cardKey);
       if (!cardId) {
         cardId = crypto.randomUUID();
         cardIds.set(cardKey, cardId);
         statements.push(env.DB.prepare('INSERT INTO cards (id, portfolio_id, card_date, region, meeting, status) VALUES (?, ?, ?, ?, ?, ?)').bind(cardId, portfolioId, payload.boardDate, entry.region, entry.track, 'verified'));
       }
-      const raceKey = `${cardKey}|${entry.raceTime}|${entry.raceName}`;
+      const raceKey = keyOf(cardKey, entry.raceTime, entry.raceName);
       const observedAt = latestObservation.get(raceKey) ?? entry.source.observedAt;
       let raceId = raceIds.get(raceKey);
       if (!raceId) {

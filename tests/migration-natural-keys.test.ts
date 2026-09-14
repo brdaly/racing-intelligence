@@ -37,8 +37,9 @@ function duplicatedDatabase() {
 
   // A result recorded against each fork for the same horse — the pair that
   // cannot both survive a repoint — plus one that can move across cleanly.
-  run("INSERT INTO race_results (id, race_id, horse_name, outcome, finish_position, official_at) VALUES ('result-first', 'race-first', 'Galway Star', 'win', 1, '2026-09-14T14:20:00Z')");
-  run("INSERT INTO race_results (id, race_id, horse_name, outcome, finish_position, official_at) VALUES ('result-second', 'race-second', 'Galway Star', 'win', 1, '2026-09-14T14:20:00Z')");
+  // The later row is a correction: the first reading had the wrong position.
+  run("INSERT INTO race_results (id, race_id, horse_name, outcome, finish_position, official_at) VALUES ('result-first', 'race-first', 'Galway Star', 'lose', 2, '2026-09-14T14:20:00Z')");
+  run("INSERT INTO race_results (id, race_id, horse_name, outcome, finish_position, official_at) VALUES ('result-second', 'race-second', 'Galway Star', 'win', 1, '2026-09-14T15:05:00Z')");
   run("INSERT INTO race_results (id, race_id, horse_name, outcome, finish_position, official_at) VALUES ('result-other', 'race-second', 'Cork Harbour', 'lose', 4, '2026-09-14T14:20:00Z')");
 
   // The same lesson approved twice by two closes of the same day.
@@ -73,7 +74,7 @@ describe('migration 0002', () => {
     ]);
   });
 
-  it('moves results across, and drops only the result that duplicates a surviving one', () => {
+  it('moves results across, and keeps only one row per horse on the surviving race', () => {
     const database = duplicatedDatabase();
 
     database.applyMigration(MIGRATION);
@@ -85,13 +86,52 @@ describe('migration 0002', () => {
     ]);
   });
 
-  it('keeps the latest approval of a duplicated lesson', () => {
+  it('carries a corrected result onto the survivor instead of discarding it', () => {
     const database = duplicatedDatabase();
 
     database.applyMigration(MIGRATION);
 
+    // The row that could not be repointed held the later official time and the
+    // corrected outcome. Deleting it unread would have kept the obsolete
+    // reading, which is the one failure a governed store cannot make quietly.
+    const [result] = database.rows<{ outcome: string; finish_position: number; official_at: string }>(
+      "SELECT outcome, finish_position, official_at FROM race_results WHERE horse_name = 'Galway Star'",
+    );
+    expect(result).toEqual({ outcome: 'win', finish_position: 1, official_at: '2026-09-14T15:05:00Z' });
+  });
+
+  it('leaves an uncontested result exactly as it was', () => {
+    const database = duplicatedDatabase();
+
+    database.applyMigration(MIGRATION);
+
+    const [result] = database.rows<{ outcome: string; finish_position: number; official_at: string }>(
+      "SELECT outcome, finish_position, official_at FROM race_results WHERE horse_name = 'Cork Harbour'",
+    );
+    expect(result).toEqual({ outcome: 'lose', finish_position: 4, official_at: '2026-09-14T14:20:00Z' });
+  });
+
+  it('carries the newest observation onto the surviving race', () => {
+    const database = duplicatedDatabase();
+
+    database.applyMigration(MIGRATION);
+
+    // 12:00 was on the row being deleted. Keeping the survivor's own 08:30 would
+    // move freshness backwards, against the publish route's own guarantee.
+    const [race] = database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races');
+    expect(race.last_observed_at).toBe('2026-09-14T12:00:00Z');
+  });
+
+  it('keeps the first approval id while applying the latest revision', () => {
+    const database = duplicatedDatabase();
+
+    database.applyMigration(MIGRATION);
+
+    // The content is the revision; the id is the one assigned at first approval,
+    // which is what the daily-close upsert preserves and what a citation of the
+    // lesson resolves against.
     const lessons = database.rows<{ id: string; observation: string }>("SELECT id, observation FROM lessons WHERE lesson_date = '2026-09-14'");
-    expect(lessons).toEqual([{ id: 'lesson-second', observation: 'Revised reading.' }]);
+    expect(lessons).toEqual([{ id: 'lesson-first', observation: 'Revised reading.' }]);
   });
 
   it('leaves the seeded launch history untouched', () => {

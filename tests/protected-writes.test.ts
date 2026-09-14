@@ -261,6 +261,25 @@ describe('POST /api/v1/publish', () => {
     expect(runs).toEqual([{ status: 'failed', records_rejected: 1 }]);
   });
 
+  it('does not confuse two meetings whose region and track share a delimiter', async () => {
+    // `isShortText` permits "|", so joined lookup keys would read
+    // ("UK|Flat", "Ascot") and ("UK", "Flat|Ascot") as one meeting: the second
+    // would reuse the first one's card and hang its race off the wrong track.
+    await publish(post('publish', board({
+      entries: [
+        entry({ rank: 1, region: 'UK|Flat', track: 'Ascot' }),
+        entry({ rank: 2, horse: 'Cork Harbour', region: 'UK', track: 'Flat|Ascot' }),
+      ],
+    })));
+
+    const cards = database.rows<{ region: string; meeting: string }>('SELECT region, meeting FROM cards ORDER BY region');
+    expect(cards).toEqual([
+      { region: 'UK', meeting: 'Flat|Ascot' },
+      { region: 'UK|Flat', meeting: 'Ascot' },
+    ]);
+    expect(database.count('races')).toBe(2);
+  });
+
   it('rejects a payload that publishes the same opinion twice rather than failing closed on it', async () => {
     const response = await publish(post('publish', board({
       entries: [entry(), entry({ rank: 2 })],
