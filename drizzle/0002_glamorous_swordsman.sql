@@ -29,12 +29,19 @@
 -- in the form the publish route now writes — and run this again. Placed ahead
 -- of every other statement so a refusal leaves the database exactly as it was.
 --
+-- Dropped first so the guard survives its own firing. A refusal leaves the
+-- table behind under a statement-at-a-time executor, and the operator's next
+-- run — the one the message asks for — would otherwise stop at "table
+-- _migration_0002_guard already exists" instead of re-checking the data.
+--
 -- The constraint is named because SQLite reports the name and nothing else:
 -- "CHECK constraint failed: <name>" is the whole of what the operator sees, so
 -- the name has to be the instruction.
+DROP TABLE IF EXISTS _migration_0002_guard;--> statement-breakpoint
+
 CREATE TABLE _migration_0002_guard (
   ok INTEGER NOT NULL,
-  CONSTRAINT duplicate_races_mix_timestamp_formats__rewrite_them_as_utc_iso_8601_then_run_this_again
+  CONSTRAINT a_duplicated_race_has_a_last_observed_at_that_is_not_utc_iso_8601__rewrite_those_values_then_run_this_again
     CHECK (ok = 1)
 );--> statement-breakpoint
 
@@ -48,7 +55,17 @@ WHERE EXISTS (
   FROM races
   JOIN cards ON cards.id = races.card_id
   WHERE races.last_observed_at IS NOT NULL
-    AND julianday(races.last_observed_at) IS NULL
+    AND (
+      -- Not canonical UTC ISO-8601, as the publish route now writes it.
+      -- Unreadable is not the only danger: SQLite reads a bare "2026" as
+      -- Julian day 2026, four thousand years BC, while `Date.parse` reads it as
+      -- 2026-01-01, and it is `isTimestamp`-valid either way. A value the two
+      -- engines disagree about is worse than one only SQLite refuses, because
+      -- nothing about it looks wrong.
+      (races.last_observed_at NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z'
+       AND races.last_observed_at NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+      OR julianday(races.last_observed_at) IS NULL
+    )
     AND EXISTS (
       SELECT 1
       FROM races other
@@ -238,6 +255,26 @@ SET (observation, evidence, action, status, rule_version, source_ref, approved_a
   LIMIT 1
 )
 WHERE rowid IN (SELECT MIN(rowid) FROM lessons GROUP BY lesson_date, title);--> statement-breakpoint
+
+-- The same reconciliation the corrected results get: an observation recorded
+-- against a later revision of a lesson would otherwise be left naming a row
+-- that is about to go, while the surviving lesson could not be traced to it.
+UPDATE source_observations
+SET entity_id = (
+  SELECT survivor.id
+  FROM lessons doomed
+  JOIN lessons survivor
+    ON survivor.lesson_date = doomed.lesson_date
+   AND survivor.title = doomed.title
+  WHERE doomed.id = source_observations.entity_id
+  ORDER BY survivor.rowid
+  LIMIT 1
+)
+WHERE entity_type = 'lesson'
+  AND entity_id IN (
+    SELECT id FROM lessons
+    WHERE rowid NOT IN (SELECT MIN(rowid) FROM lessons GROUP BY lesson_date, title)
+  );--> statement-breakpoint
 
 DELETE FROM lessons
 WHERE rowid NOT IN (SELECT MIN(rowid) FROM lessons GROUP BY lesson_date, title);--> statement-breakpoint
