@@ -48,6 +48,10 @@ export function validatePublishPayload(payload: unknown): payload is PublishPayl
   if (!Array.isArray(value.entries) || value.entries.length < 1 || value.entries.length > 20) return false;
 
   const ranks = new Set<number>();
+  // The identity an opinion is stored under. Two entries sharing it are one
+  // opinion published twice, which the database refuses at the (logical_id,
+  // version) key: catching it here returns 422 rather than a 503 fail-closed.
+  const opinionKeys = new Set<string>();
   for (const entry of value.entries) {
     if (!entry || !Number.isInteger(entry.rank) || entry.rank < 1 || entry.rank > 20 || ranks.has(entry.rank)) return false;
     ranks.add(entry.rank);
@@ -58,6 +62,10 @@ export function validatePublishPayload(payload: unknown): payload is PublishPayl
     // entries that happened to carry a URL, so an entry with none at all
     // published unchallenged while SECURITY.md described it as rejected.
     if (!isShortText(entry.source.url, 1000) || !/^https:\/\//.test(entry.source.url)) return false;
+
+    const opinionKey = `${entry.track}:${entry.raceTime}:${entry.horse}`;
+    if (opinionKeys.has(opinionKey)) return false;
+    opinionKeys.add(opinionKey);
   }
 
   return true;

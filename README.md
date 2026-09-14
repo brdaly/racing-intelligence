@@ -87,6 +87,12 @@ Protected write routes:
 
 Write requests require `Authorization: Bearer <DASHBOARD_UPDATE_TOKEN>`, explicit approval in the validated payload, and a configured D1 binding. Invalid or unauthorized requests fail without publishing changes.
 
+Both write routes are safe to repeat:
+
+- Republishing a board raises the board version and supersedes the previous one, while reusing the `cards` and `races` rows for the same meeting and race. A race therefore keeps one row across every version of the board that names it, and `last_observed_at` moves forward to the newest observation in the payload, never backwards.
+- Re-closing a day overwrites that day's `daily_performance` row and revises any lesson it names in place. A lesson is identified by its date and title, and keeps the id of its first approval. Lessons approved on that date by an earlier close and left out of a later one are not deleted.
+- A payload that names the same lesson twice, or publishes the same horse in the same race twice, is rejected with 422.
+
 ## Database and deployment
 
 - Schema: `db/schema.ts`

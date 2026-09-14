@@ -30,6 +30,12 @@ is coordinated after a fix; no response or remediation SLA is offered.
   passes schema, range, and arithmetic validation.
 - Publication gates reject boards without an HTTPS evidence URL, a verification
   status, a freshness stamp, or a unique rank ordering.
+- Repeating a governed write revises what is stored rather than adding a second
+  copy of it. `cards`, `races` and `lessons` carry natural keys, so republishing
+  a board reuses the meeting and race rows it already created, and re-closing a
+  day revises that day's lessons in place. Board versions and their opinions are
+  still appended: the version history is the record, and only the newest version
+  is `published`.
 - Domain writes are applied as a single atomic `D1.batch`. A failure publishes
   nothing and is recorded against an `update_runs` row that is opened outside
   the batch, so the audit trail survives the rollback it describes.
