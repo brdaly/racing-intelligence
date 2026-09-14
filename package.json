@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.54.7",
-    "@cloudflare/workers-types": "4.20260702.1",
+    "@cloudflare/workers-types": "5.20260911.1",
     "@openai/sites-vite-plugin": "^0.1.0 || ^0.2.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.20.2",
