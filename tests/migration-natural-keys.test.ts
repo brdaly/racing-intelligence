@@ -19,12 +19,15 @@ type Fixture = {
   observations?: [string, string];
   /** Attach a source observation to the result that cannot be repointed. */
   observeResult?: boolean;
+  /** Attach a source observation to the later revision of the lesson. */
+  observeLesson?: boolean;
 };
 
 function duplicatedDatabase({
   correctionOfficialAt = '2026-09-14T15:05:00Z',
   observations = ['2026-09-14T08:30:00Z', '2026-09-14T12:00:00Z'],
   observeResult = false,
+  observeLesson = false,
 }: Fixture = {}) {
   const database = createTestDatabase({ through: '0001' });
   const run = (sql: string, ...values: (string | number | null)[]) =>
@@ -58,6 +61,10 @@ function duplicatedDatabase({
   if (observeResult) {
     run("INSERT INTO source_observations (id, entity_type, entity_id, source_name, data_type, reliability_tier, observed_at, verification_status) VALUES ('obs-correction', 'race_result', 'result-second', 'Racing Post', 'result', 'primary', '2026-09-14T15:05:00Z', 'verified')");
     run("INSERT INTO source_observations (id, entity_type, entity_id, source_name, data_type, reliability_tier, observed_at, verification_status) VALUES ('obs-unrelated', 'opinion', 'result-second', 'Racing Post', 'racecard', 'primary', '2026-09-14T08:30:00Z', 'verified')");
+  }
+
+  if (observeLesson) {
+    run("INSERT INTO source_observations (id, entity_type, entity_id, source_name, data_type, reliability_tier, observed_at, verification_status) VALUES ('obs-lesson', 'lesson', 'lesson-second', 'Daily close', 'lesson', 'primary', '2026-09-14T22:00:00Z', 'verified')");
   }
 
   // The same lesson approved twice by two closes of the same day.
@@ -198,7 +205,7 @@ describe('migration 0002, on the cases the data itself cannot settle', () => {
       observations: ['2026-09-14T12:00:00Z', 'Sep 14, 2026 13:00:00 UTC'],
     });
 
-    expect(() => database.applyMigration(MIGRATION)).toThrow(/duplicate_races_mix_timestamp_formats__rewrite_them_as_utc_iso_8601_then_run_this_again/);
+    expect(() => database.applyMigration(MIGRATION)).toThrow(/a_duplicated_race_has_a_last_observed_at_that_is_not_utc_iso_8601__rewrite_those_values_then_run_this_again/);
   });
 
   it('refuses before changing anything, so the refusal is recoverable', () => {
@@ -255,5 +262,70 @@ describe('migration 0002, on the cases the data itself cannot settle', () => {
     const [unrelated] = database.rows<{ entity_id: string }>("SELECT entity_id FROM source_observations WHERE id = 'obs-unrelated'");
     expect(unrelated.entity_id).toBe('result-second');
     expect(database.rows("SELECT id FROM race_results WHERE id = 'result-second'")).toHaveLength(0);
+  });
+});
+
+describe('migration 0002, guarding its own recovery path', () => {
+  it('refuses a timestamp SQLite and JavaScript read as different instants', () => {
+    // Both values pass `isTimestamp`. SQLite reads "2026" as Julian day 2026 —
+    // four thousand years BC — while `Date.parse` reads it as 2026-01-01, so
+    // ordering by the instant would keep the older ISO row and delete the newer
+    // one. A value the two engines disagree about is worse than one SQLite
+    // simply refuses, because nothing about it looks wrong.
+    const database = duplicatedDatabase({ observations: ['2025-12-31T23:00:00Z', '2026'] });
+
+    expect(() => database.applyMigration(MIGRATION)).toThrow(/not_utc_iso_8601/);
+  });
+
+  it('accepts the canonical form the publish route writes, with or without milliseconds', () => {
+    const database = duplicatedDatabase({
+      observations: ['2026-09-14T08:30:00Z', '2026-09-14T12:00:00.000Z'],
+    });
+
+    expect(() => database.applyMigration(MIGRATION)).not.toThrow();
+    expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
+      .toBe('2026-09-14T12:00:00.000Z');
+  });
+
+  it('can be run again after it refuses', () => {
+    // The refusal leaves the guard table behind under a statement-at-a-time
+    // executor, which is how this repository and `wrangler d1 execute` both
+    // apply a migration file. Without the drop, the operator's second run stops
+    // at "table already exists" rather than re-checking the data they fixed.
+    const database = duplicatedDatabase({ observations: ['2025-12-31T23:00:00Z', '2026'] });
+    expect(() => database.applyMigration(MIGRATION)).toThrow(/not_utc_iso_8601/);
+
+    expect(() => database.applyMigration(MIGRATION)).toThrow(/not_utc_iso_8601/);
+
+    // And once the values are canonical, the rerun the message asks for works.
+    database.sqlite.prepare("UPDATE races SET last_observed_at = '2026-01-01T00:00:00.000Z' WHERE id = 'race-second'").run();
+    expect(() => database.applyMigration(MIGRATION)).not.toThrow();
+    expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
+      .toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('repoints an observation that named a deleted lesson revision', () => {
+    const database = duplicatedDatabase({ observeLesson: true });
+
+    database.applyMigration(MIGRATION);
+
+    const [observation] = database.rows<{ entity_id: string }>("SELECT entity_id FROM source_observations WHERE id = 'obs-lesson'");
+    expect(observation.entity_id).toBe('lesson-first');
+  });
+});
+
+describe('migration 0002, applied to a database that already ran a version of it', () => {
+  it('can be applied again without failing on the indexes it created', () => {
+    // A database that took an earlier version of this file has the natural keys
+    // already. Re-running cannot bring back rows that version deleted, but it
+    // has to be able to run at all, or the way forward is manual surgery.
+    const database = duplicatedDatabase();
+    database.applyMigration(MIGRATION);
+
+    expect(() => database.applyMigration(MIGRATION)).not.toThrow();
+
+    expect(database.rows<{ id: string }>('SELECT id FROM races')).toEqual([{ id: 'race-first' }]);
+    expect(database.rows<{ id: string }>('SELECT id FROM cards')).toEqual([{ id: 'card-first' }]);
+    expect(database.rows("SELECT id FROM lessons WHERE lesson_date = '2026-09-14'")).toHaveLength(1);
   });
 });
