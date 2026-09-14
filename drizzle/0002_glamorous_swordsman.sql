@@ -279,6 +279,10 @@ WHERE entity_type = 'lesson'
 DELETE FROM lessons
 WHERE rowid NOT IN (SELECT MIN(rowid) FROM lessons GROUP BY lesson_date, title);--> statement-breakpoint
 
-CREATE UNIQUE INDEX `idx_cards_portfolio_region_meeting` ON `cards` (`portfolio_id`,`region`,`meeting`);--> statement-breakpoint
-CREATE UNIQUE INDEX `idx_lessons_date_title` ON `lessons` (`lesson_date`,`title`);--> statement-breakpoint
-CREATE UNIQUE INDEX `idx_races_card_post_time_name` ON `races` (`card_id`,`post_time`,`race_name`);
+-- IF NOT EXISTS so the file can be applied to a database that already ran an
+-- earlier version of it. Nothing here recovers rows a flawed run deleted, but
+-- re-running must not fail on the indexes that run created, or the only way
+-- forward from a partial or superseded application is manual surgery.
+CREATE UNIQUE INDEX IF NOT EXISTS `idx_cards_portfolio_region_meeting` ON `cards` (`portfolio_id`,`region`,`meeting`);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `idx_lessons_date_title` ON `lessons` (`lesson_date`,`title`);--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `idx_races_card_post_time_name` ON `races` (`card_id`,`post_time`,`race_name`);

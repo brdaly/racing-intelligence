@@ -313,3 +313,19 @@ describe('migration 0002, guarding its own recovery path', () => {
     expect(observation.entity_id).toBe('lesson-first');
   });
 });
+
+describe('migration 0002, applied to a database that already ran a version of it', () => {
+  it('can be applied again without failing on the indexes it created', () => {
+    // A database that took an earlier version of this file has the natural keys
+    // already. Re-running cannot bring back rows that version deleted, but it
+    // has to be able to run at all, or the way forward is manual surgery.
+    const database = duplicatedDatabase();
+    database.applyMigration(MIGRATION);
+
+    expect(() => database.applyMigration(MIGRATION)).not.toThrow();
+
+    expect(database.rows<{ id: string }>('SELECT id FROM races')).toEqual([{ id: 'race-first' }]);
+    expect(database.rows<{ id: string }>('SELECT id FROM cards')).toEqual([{ id: 'card-first' }]);
+    expect(database.rows("SELECT id FROM lessons WHERE lesson_date = '2026-09-14'")).toHaveLength(1);
+  });
+});
