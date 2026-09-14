@@ -13,6 +13,57 @@
 -- order below matters: every carry-across happens while its source row is still
 -- there.
 
+-- Refuse rather than guess, before anything is changed.
+--
+-- `isTimestamp` accepts any format `Date.parse` understands, so a stored
+-- `last_observed_at` need not be one SQLite can read, and two values in
+-- different formats cannot be ordered against each other in SQL at all. An
+-- earlier version of this migration fell back to insertion order for such a
+-- group. That fixed the case where the later row held the newer unreadable
+-- value and broke its mirror: where the SURVIVOR holds the newer unreadable
+-- value, insertion order keeps the stale one, and the deletion that follows
+-- makes it unrecoverable.
+--
+-- There is no third answer available to SQL here, so the migration stops. The
+-- remedy is to rewrite the affected values as UTC ISO-8601 — the same instant,
+-- in the form the publish route now writes — and run this again. Placed ahead
+-- of every other statement so a refusal leaves the database exactly as it was.
+--
+-- The constraint is named because SQLite reports the name and nothing else:
+-- "CHECK constraint failed: <name>" is the whole of what the operator sees, so
+-- the name has to be the instruction.
+CREATE TABLE _migration_0002_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT duplicate_races_mix_timestamp_formats__rewrite_them_as_utc_iso_8601_then_run_this_again
+    CHECK (ok = 1)
+);--> statement-breakpoint
+
+INSERT INTO _migration_0002_guard (ok)
+SELECT 0
+WHERE EXISTS (
+  -- Grouped through the card's natural key rather than `card_id`, because this
+  -- runs before duplicate cards are collapsed: two rows for one race still sit
+  -- on two different card ids at this point.
+  SELECT 1
+  FROM races
+  JOIN cards ON cards.id = races.card_id
+  WHERE races.last_observed_at IS NOT NULL
+    AND julianday(races.last_observed_at) IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM races other
+      JOIN cards other_card ON other_card.id = other.card_id
+      WHERE other_card.portfolio_id = cards.portfolio_id
+        AND other_card.region = cards.region
+        AND other_card.meeting = cards.meeting
+        AND other.post_time = races.post_time
+        AND other.race_name = races.race_name
+        AND other.id <> races.id
+    )
+);--> statement-breakpoint
+
+DROP TABLE _migration_0002_guard;--> statement-breakpoint
+
 -- Repoint every race at the earliest card for its (portfolio, region, meeting).
 UPDATE races
 SET card_id = (
@@ -100,9 +151,13 @@ WHERE race_id IN (
 -- onto the survivor leaves the observation itself still naming the result row
 -- about to be deleted. The provenance of the correction would survive in one
 -- direction and dangle in the other, in exactly the case this is meant to keep
--- whole. Matched by id alone rather than by an `entity_type` string, because
--- nothing in this repository writes an observation for a result yet and
--- guessing the value it will use would be worse than matching without it.
+-- whole. Scoped to `entity_type = 'race_result'`, because an id is unique only
+-- within its own table and the observation index is `(entity_type, entity_id)`:
+-- matching on the id alone could rewrite an observation of a different entity
+-- that happens to share it. Nothing in this repository writes an observation
+-- for a result yet, so this sets the type name rather than reading it, and a
+-- row stored under some other name is left alone rather than rewritten — the
+-- safe direction of a guess that has to be made either way.
 --
 -- `entity_id` is NOT NULL, so a group that somehow has no surviving result
 -- fails the migration rather than writing a dangling row.
@@ -122,7 +177,8 @@ SET entity_id = (
   ORDER BY survivor_race.rowid
   LIMIT 1
 )
-WHERE entity_id IN (
+WHERE entity_type = 'race_result'
+  AND entity_id IN (
   SELECT id FROM race_results
   WHERE race_id IN (
     SELECT id FROM races
@@ -141,13 +197,9 @@ WHERE race_id IN (
 -- would move race freshness backwards, contradicting the monotonic guarantee the
 -- publish route now makes, so the newest is carried across first.
 --
--- `isTimestamp` accepts any format `Date.parse` understands, so a stored value
--- need not be one SQLite can read. `julianday` returns NULL for those, and NULL
--- sorts last under DESC, which would make an ISO value beat a genuinely newer
--- non-ISO one every time. Where a group mixes the two, no comparison of the
--- values themselves is available, so the first key collapses to NULL for the
--- whole group and insertion order decides — the later publication's row. Where
--- every value is readable, the instants decide, as they should.
+-- Compared as instants. The guard at the top of this migration has already
+-- established that every value in a duplicated group is one SQLite can read, so
+-- `julianday` is never NULL here and insertion order only breaks a genuine tie.
 UPDATE races
 SET last_observed_at = (
   SELECT best.last_observed_at
@@ -156,16 +208,7 @@ SET last_observed_at = (
     AND best.post_time = races.post_time
     AND best.race_name = races.race_name
     AND best.last_observed_at IS NOT NULL
-  ORDER BY
-    CASE WHEN EXISTS (
-      SELECT 1 FROM races unreadable
-      WHERE unreadable.card_id = best.card_id
-        AND unreadable.post_time = best.post_time
-        AND unreadable.race_name = best.race_name
-        AND unreadable.last_observed_at IS NOT NULL
-        AND julianday(unreadable.last_observed_at) IS NULL
-    ) THEN NULL ELSE julianday(best.last_observed_at) END DESC,
-    best.rowid DESC
+  ORDER BY julianday(best.last_observed_at) DESC, best.rowid DESC
   LIMIT 1
 )
 WHERE rowid IN (SELECT MIN(rowid) FROM races GROUP BY card_id, post_time, race_name)

@@ -57,6 +57,7 @@ function duplicatedDatabase({
 
   if (observeResult) {
     run("INSERT INTO source_observations (id, entity_type, entity_id, source_name, data_type, reliability_tier, observed_at, verification_status) VALUES ('obs-correction', 'race_result', 'result-second', 'Racing Post', 'result', 'primary', '2026-09-14T15:05:00Z', 'verified')");
+    run("INSERT INTO source_observations (id, entity_type, entity_id, source_name, data_type, reliability_tier, observed_at, verification_status) VALUES ('obs-unrelated', 'opinion', 'result-second', 'Racing Post', 'racecard', 'primary', '2026-09-14T08:30:00Z', 'verified')");
   }
 
   // The same lesson approved twice by two closes of the same day.
@@ -189,19 +190,41 @@ describe('migration 0002, on the cases the data itself cannot settle', () => {
     expect(result).toEqual({ outcome: 'win', finish_position: 1, official_at: '2026-09-14T13:00:00Z' });
   });
 
-  it('keeps the newest observation when the two rows are in different formats', () => {
-    // `isTimestamp` accepts anything `Date.parse` reads, so a stored value need
-    // not be one SQLite can. `julianday` returns NULL for the second of these,
-    // and NULL sorts last under DESC, so comparing the values would hand it to
-    // the older ISO row. Insertion order is the signal that survives.
+  it('refuses to run when a duplicated race mixes timestamp formats', () => {
+    // Two formats cannot be ordered against each other in SQL, and whichever
+    // rule is chosen loses the newer value in one of the two arrangements. The
+    // migration stops instead of guessing.
     const database = duplicatedDatabase({
       observations: ['2026-09-14T12:00:00Z', 'Sep 14, 2026 13:00:00 UTC'],
     });
 
-    database.applyMigration(MIGRATION);
+    expect(() => database.applyMigration(MIGRATION)).toThrow(/duplicate_races_mix_timestamp_formats__rewrite_them_as_utc_iso_8601_then_run_this_again/);
+  });
 
-    const [race] = database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races');
-    expect(race.last_observed_at).toBe('Sep 14, 2026 13:00:00 UTC');
+  it('refuses before changing anything, so the refusal is recoverable', () => {
+    const database = duplicatedDatabase({
+      observations: ['Sep 14, 2026 13:00:00 UTC', '2026-09-14T12:00:00Z'],
+    });
+    const before = database.rows('SELECT id FROM races ORDER BY id');
+
+    expect(() => database.applyMigration(MIGRATION)).toThrow();
+
+    // The mirror arrangement of the case above, and the one an insertion-order
+    // fallback got wrong: the survivor holds the newer unreadable value.
+    expect(database.rows('SELECT id FROM races ORDER BY id')).toEqual(before);
+    expect(database.count('cards')).toBe(2);
+    expect(database.rows("SELECT id FROM lessons WHERE lesson_date = '2026-09-14'")).toHaveLength(2);
+  });
+
+  it('does not refuse over an unreadable timestamp on a race with no duplicate', () => {
+    const database = createTestDatabase({ through: '0001' });
+    database.sqlite.prepare("INSERT INTO portfolios (id, decision_date, currency, notional_cap_cents, status, created_at) VALUES ('p2', '2026-09-15', 'USD', 10000, 'active', '2026-09-15T08:00:00Z')").run();
+    database.sqlite.prepare("INSERT INTO cards (id, portfolio_id, card_date, region, meeting, status) VALUES ('card-solo', 'p2', '2026-09-15', 'IE', 'Naas', 'verified')").run();
+    database.sqlite.prepare("INSERT INTO races (id, card_id, post_time, race_name, status, last_observed_at) VALUES ('race-solo', 'card-solo', '15:10', 'Naas Handicap', 'confirmed', 'Sep 15, 2026 09:00:00 UTC')").run();
+
+    expect(() => database.applyMigration(MIGRATION)).not.toThrow();
+    expect(database.rows<{ last_observed_at: string }>('SELECT last_observed_at FROM races')[0].last_observed_at)
+      .toBe('Sep 15, 2026 09:00:00 UTC');
   });
 
   it('still compares instants when both rows are readable', () => {
@@ -226,6 +249,11 @@ describe('migration 0002, on the cases the data itself cannot settle', () => {
     // points at the observation — and would have dangled in the other.
     const [observation] = database.rows<{ entity_id: string }>("SELECT entity_id FROM source_observations WHERE id = 'obs-correction'");
     expect(observation.entity_id).toBe('result-first');
+
+    // An observation of a different entity that happens to share the id is not
+    // touched: ids are unique within a table, and the index is by type and id.
+    const [unrelated] = database.rows<{ entity_id: string }>("SELECT entity_id FROM source_observations WHERE id = 'obs-unrelated'");
+    expect(unrelated.entity_id).toBe('result-second');
     expect(database.rows("SELECT id FROM race_results WHERE id = 'result-second'")).toHaveLength(0);
   });
 });
