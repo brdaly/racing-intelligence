@@ -15,6 +15,13 @@
       "when": 1787784787862,
       "tag": "0001_seed-history",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789390619701,
+      "tag": "0002_glamorous_swordsman",
+      "breakpoints": true
     }
   ]
 }

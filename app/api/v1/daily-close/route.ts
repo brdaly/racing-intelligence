@@ -25,6 +25,10 @@ function validate(payload: unknown): payload is ClosePayload {
   if (Number(value.unresolved) !== Number(value.recommendations) - Number(value.settled)) return false;
   if (value.fullySettled && Number(value.unresolved) !== 0) return false;
   if (value.lessons && (!Array.isArray(value.lessons) || value.lessons.length > 10 || value.lessons.some((lesson) => !isShortText(lesson.title, 180) || !isShortText(lesson.observation, 1200) || !isShortText(lesson.evidence, 1200) || !isShortText(lesson.action, 1200) || !['adopted', 'watchlist', 'quarantined'].includes(lesson.status)))) return false;
+  // A lesson is identified by its day and title, so one close that names the
+  // same title twice has no single answer to store. Reject it here rather than
+  // let the last copy silently overwrite the others.
+  if (value.lessons && new Set(value.lessons.map((lesson) => lesson.title)).size !== value.lessons.length) return false;
   return true;
 }
 
@@ -50,7 +54,16 @@ export async function POST(request: Request) {
       `).bind(payload.date, payload.recommendations, payload.settled, payload.unresolved, payload.settledStakeCents, payload.grossReturnCents, payload.profitLossCents, roi, payload.wins, payload.losses, payload.voids, payload.fullySettled ? 1 : 0, payload.dataAsOf),
     ];
     for (const lesson of payload.lessons ?? []) {
-      statements.push(env.DB.prepare('INSERT INTO lessons (id, lesson_date, title, observation, evidence, action, status, rule_version, source_ref, approved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(crypto.randomUUID(), payload.date, lesson.title, lesson.observation, lesson.evidence, lesson.action, lesson.status, 'v2', lesson.sourceRef ?? null, now));
+      // Re-closing a day revises its lessons rather than appending copies of
+      // them: the natural key is (lesson_date, title), and the id of the first
+      // approval survives so anything already citing that lesson still resolves.
+      statements.push(env.DB.prepare(`
+        INSERT INTO lessons (id, lesson_date, title, observation, evidence, action, status, rule_version, source_ref, approved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(lesson_date, title) DO UPDATE SET observation=excluded.observation, evidence=excluded.evidence,
+          action=excluded.action, status=excluded.status, rule_version=excluded.rule_version,
+          source_ref=excluded.source_ref, approved_at=excluded.approved_at
+      `).bind(crypto.randomUUID(), payload.date, lesson.title, lesson.observation, lesson.evidence, lesson.action, lesson.status, 'v2', lesson.sourceRef ?? null, now));
     }
     statements.push(
       env.DB.prepare('INSERT INTO publication_events (id, snapshot_id, event_type, event_at, actor, change_summary) VALUES (?, NULL, ?, ?, ?, ?)').bind(crypto.randomUUID(), 'daily_close', now, payload.approvedBy, `Daily performance and ${payload.lessons?.length ?? 0} learning records approved for ${payload.date}.`),

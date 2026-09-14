@@ -16,7 +16,13 @@ export const cards = sqliteTable('cards', {
   region: text('region').notNull(),
   meeting: text('meeting').notNull(),
   status: text('status').notNull(),
-}, (table) => [index('idx_cards_portfolio').on(table.portfolioId), index('idx_cards_date').on(table.cardDate)]);
+}, (table) => [
+  // A meeting is one physical card per portfolio: republishing a board must
+  // find the existing row rather than mint a second one for the same meeting.
+  uniqueIndex('idx_cards_portfolio_region_meeting').on(table.portfolioId, table.region, table.meeting),
+  index('idx_cards_portfolio').on(table.portfolioId),
+  index('idx_cards_date').on(table.cardDate),
+]);
 
 export const races = sqliteTable('races', {
   id: text('id').primaryKey(),
@@ -28,7 +34,13 @@ export const races = sqliteTable('races', {
   fieldSize: integer('field_size'),
   status: text('status').notNull(),
   lastObservedAt: text('last_observed_at'),
-}, (table) => [index('idx_races_card_post_time').on(table.cardId, table.postTime), index('idx_races_status').on(table.status)]);
+}, (table) => [
+  // The natural key of a race: one post time and name on one card. Results and
+  // opinions must be able to reach the same race row across republications.
+  uniqueIndex('idx_races_card_post_time_name').on(table.cardId, table.postTime, table.raceName),
+  index('idx_races_card_post_time').on(table.cardId, table.postTime),
+  index('idx_races_status').on(table.status),
+]);
 
 export const opinions = sqliteTable('opinions', {
   id: text('id').primaryKey(),
@@ -158,7 +170,12 @@ export const lessons = sqliteTable('lessons', {
   ruleVersion: text('rule_version').notNull(),
   sourceRef: text('source_ref'),
   approvedAt: text('approved_at'),
-}, (table) => [index('idx_lessons_status_date').on(table.status, table.lessonDate)]);
+}, (table) => [
+  // A lesson is identified by the day it was drawn from and its title, so
+  // re-closing a day revises the lesson instead of appending a copy of it.
+  uniqueIndex('idx_lessons_date_title').on(table.lessonDate, table.title),
+  index('idx_lessons_status_date').on(table.status, table.lessonDate),
+]);
 
 export const publicationEvents = sqliteTable('publication_events', {
   id: text('id').primaryKey(),
