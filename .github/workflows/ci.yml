@@ -9,9 +9,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: validate-${{ github.ref }}
-  # Never cancel main's own validation: each commit on the default branch is
-  # the record that it was checked, and a superseding push must not erase it.
+  # Each commit on the default branch gets its OWN group, so no main run ever
+  # queues behind another. Not cancelling is not enough on its own: a group
+  # holds one running plus one pending run, and a third push evicts the pending
+  # one, which is how a middle commit loses its validation record even with
+  # cancel-in-progress off. Pull request branches keep the shared group and
+  # still cancel superseded runs, which is what you want there.
+  group: validate-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'shared' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

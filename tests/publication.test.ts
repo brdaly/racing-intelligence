@@ -87,6 +87,30 @@ describe('validatePublishPayload', () => {
     expect(validatePublishPayload(payload)).toBe(false);
   });
 
+  // The URL check used to run only when a URL was present, so an entry with no
+  // evidence link at all published unchallenged while SECURITY.md described the
+  // gate as rejecting it. Only the non-HTTPS case above was covered, which is
+  // why the hole survived.
+  it('rejects an entry with no evidence URL at all', () => {
+    const payload = validPayload();
+    const source = { ...payload.entries[0].source };
+    Reflect.deleteProperty(source, 'url');
+    payload.entries[0].source = source as PublishPayload['entries'][number]['source'];
+    expect(validatePublishPayload(payload)).toBe(false);
+  });
+
+  it('rejects an empty evidence URL', () => {
+    const payload = validPayload();
+    payload.entries[0].source.url = '';
+    expect(validatePublishPayload(payload)).toBe(false);
+  });
+
+  it('rejects an oversized evidence URL', () => {
+    const payload = validPayload();
+    payload.entries[0].source.url = `https://example.com/${'e'.repeat(1000)}`;
+    expect(validatePublishPayload(payload)).toBe(false);
+  });
+
   it.each([-1, 26, 1.5])('rejects an invalid conflict count: %s', (conflictCount) => {
     expect(validatePublishPayload({ ...validPayload(), conflictCount })).toBe(false);
   });

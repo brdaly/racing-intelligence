@@ -19,7 +19,8 @@ export type PublishEntry = {
   actionable: boolean;
   source: {
     name: string;
-    url?: string;
+    /** Required. An entry with no reachable evidence is not evidence. */
+    url: string;
     dataType: string;
     reliabilityTier: string;
     observedAt: string;
@@ -53,7 +54,10 @@ export function validatePublishPayload(payload: unknown): payload is PublishPayl
     if (![entry.horse, entry.region, entry.track, entry.raceTime, entry.raceName, entry.tier, entry.confidence, entry.observedOdds, entry.fairOdds, entry.minimumOdds, entry.verdict].every((item) => isShortText(item, 180))) return false;
     if (!isShortText(entry.whyRanked, 1200) || !isShortText(entry.biggestRisk, 1200) || !isTimestamp(entry.priceVerifiedAt) || typeof entry.actionable !== 'boolean') return false;
     if (!entry.source || !isShortText(entry.source.name, 180) || !isShortText(entry.source.dataType, 120) || !isShortText(entry.source.reliabilityTier, 80) || !isTimestamp(entry.source.observedAt) || !isShortText(entry.source.verificationStatus, 80)) return false;
-    if (entry.source.url && (entry.source.url.length > 1000 || !/^https:\/\//.test(entry.source.url))) return false;
+    // Required, not merely validated when present. The gate existed only for
+    // entries that happened to carry a URL, so an entry with none at all
+    // published unchallenged while SECURITY.md described it as rejected.
+    if (!isShortText(entry.source.url, 1000) || !/^https:\/\//.test(entry.source.url)) return false;
   }
 
   return true;
