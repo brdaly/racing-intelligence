@@ -8,17 +8,40 @@ allowBuilds:
 # published advisory; drop it once the tree resolves above the patched version
 # on its own.
 overrides:
+  "brace-expansion@>=1.0.0 <1.1.21": 1.1.21 # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p, GHSA-q2hr-2g5m-vwhr
+  "brace-expansion@>=5.0.0 <5.0.12": 5.0.12 # GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p, GHSA-q2hr-2g5m-vwhr
+  "fast-uri@>=3.0.0 <3.1.8": 3.1.8 # GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g, GHSA-hrr3-gc8f-f4qj
+  "fflate@>=0.7.0 <0.7.5": 0.7.5 # GHSA-px8p-9vwx-vf98
   "esbuild@<0.24.3": 0.25.12 # GHSA-67mh-4wv8-2f99
   "js-yaml@<4.3.2": 4.3.2 # GHSA-2883-xcg3-v3hh
-  "sharp@<0.35.4": 0.35.4
+  "sharp@<0.35.5": 0.35.5 # GHSA-wq5f-xc86-pv6w
+  "source-map-js@<1.2.2": 1.2.2 # GHSA-68fv-2mgg-jv7q
 
-# image-size GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq have no patched
-# release: both name >=2.0.3 and 2.0.2 is the newest published version, so no
-# override can clear them. The package reaches the tree only through vinext's
-# build-time image handling and never runs in the deployed Worker, which
-# `pnpm run audit:prod` confirms independently. Remove these two entries as
-# soon as image-size ships a fix.
+# The two image-size ignores that stood here are gone: vinext 1.0.1 drops the
+# dependency, so `pnpm why image-size` now reports nothing and GHSA-w3rx-r6r6-pgpr
+# and GHSA-5p2g-fcmc-qvqq no longer apply to this tree. (image-size also shipped
+# 2.0.3 and 2.0.4 in the meantime, which the old comment's removal condition
+# named.) Nothing replaces them -- a rule for a package the tree does not resolve
+# is dead weight.
+#
+# braces GHSA-vfj7-8cjw-p6xm names >=3.0.4 as patched, and no such release
+# exists: 3.0.3 is the newest version on the registry and has been since
+# 2024-05-21. The chain above it is already at its own latest -- micromatch
+# 4.0.8 requires braces ^3.0.3 and fast-glob 3.3.3 requires micromatch ^4.0.8 --
+# so no override or dependency bump can satisfy the advisory. It is ignored
+# rather than left failing because an unsatisfiable gate cannot be acted on,
+# and leaving it red hides every real finding behind it.
+#
+# The exposure is build-time only. braces reaches the tree through two lint and
+# bundler paths, eslint-config-next > @next/eslint-plugin-next > fast-glob and
+# vinext > vite-plugin-commonjs > vite-plugin-dynamic-import > fast-glob, and
+# never ships to the deployed Worker; `pnpm run audit:prod` gates that
+# independently and must stay green. The advisory is a stack-exhaustion denial
+# of service reachable only by passing an attacker-controlled glob pattern,
+# which neither path does.
+#
+# Remove this entry once braces publishes a release above 3.0.3, or once the
+# tree stops resolving braces at all. Re-check with `pnpm why braces`.
 auditConfig:
   ignoreGhsas:
-    - GHSA-w3rx-r6r6-pgpr
-    - GHSA-5p2g-fcmc-qvqq
+    - GHSA-vfj7-8cjw-p6xm

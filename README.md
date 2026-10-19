@@ -90,7 +90,7 @@ Write requests require `Authorization: Bearer <DASHBOARD_UPDATE_TOKEN>`, explici
 Both write routes are safe to repeat:
 
 - Republishing a board raises the board version and supersedes the previous one, while reusing the `cards` and `races` rows for the same meeting and race. A race therefore keeps one row across every version of the board that names it, and `last_observed_at` moves forward to the newest observation in the payload, never backwards.
-- Re-closing a day overwrites that day's `daily_performance` row and revises any lesson it names in place. A lesson is identified by its date and title, and keeps the id of its first approval. Lessons approved on that date by an earlier close and left out of a later one are not deleted.
+- Re-closing a day overwrites that day's `daily_performance` row and revises any lesson it names in place. A lesson is identified by its date and title, and keeps the id of its first approval. This requires migration `0002`; on a database that has not taken it, a close naming a lesson is refused outright rather than duplicated. Lessons approved on that date by an earlier close and left out of a later one are not deleted.
 - A payload that names the same lesson twice, or publishes the same horse in the same race twice, is rejected with 422.
 
 ## Database and deployment
@@ -99,6 +99,27 @@ Both write routes are safe to repeat:
 - Migrations: `drizzle/`
 - Logical Sites bindings: `.openai/hosting.json`
 - Local migration generation: `pnpm db:generate`
+
+**Migrations are generated here but not applied here.** No workflow, script or
+build step in this repository runs them, so applying them is a deliberate
+operator step against the hosted D1 database:
+
+```
+wrangler d1 migrations apply DB --remote
+```
+
+`migrations_dir` is set to `drizzle` in `vite.config.ts`, so the generated
+`dist/server/wrangler.json` points at the files above; the `database_id` in
+that generated config is the Sites placeholder, so the command must run where
+the real `DB` binding resolves. `0002` is the one that matters most: it creates
+the unique indexes the natural-key controls depend on, and
+`app/api/v1/daily-close/route.ts` names `(lesson_date, title)` in an
+`ON CONFLICT` clause that SQLite rejects without it. Confirm with:
+
+```
+wrangler d1 execute DB --remote --command \
+  "SELECT name FROM sqlite_schema WHERE type='index' AND name='idx_lessons_date_title'"
+```
 
 Production secrets are configured in the hosting environment, never in source control. A live-data integration must use a licensed source with explicit website-publication rights and retain source, observation time, verification status, and change history.
 
