@@ -21,6 +21,12 @@ const localBindingConfig = {
           binding: d1,
           database_name: 'site-creator-d1',
           database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          // `drizzle-kit generate` writes to `drizzle/`, but Wrangler's default
+          // migrations directory is `migrations/`, so the generated
+          // `dist/server/wrangler.json` named a path that has never existed in
+          // this repository. Any migration runner reading that config found an
+          // empty set and reported nothing to do.
+          migrations_dir: 'drizzle',
         },
       ]
     : [],
