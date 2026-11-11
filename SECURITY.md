@@ -33,7 +33,13 @@ is coordinated after a fix; no response or remediation SLA is offered.
 - Repeating a governed write revises what is stored rather than adding a second
   copy of it. `cards`, `races` and `lessons` carry natural keys, so republishing
   a board reuses the meeting and race rows it already created, and re-closing a
-  day revises that day's lessons in place. Board versions and their opinions are
+  day revises that day's lessons in place. The unique indexes behind those
+  natural keys are created by migration `0002`, which this repository generates
+  but does not apply, so this control holds only on a database that has taken
+  it. Until then the publish route's read-then-reuse keeps the single-writer
+  case correct, the concurrent case is not refused, and a daily close naming a
+  lesson fails closed rather than writing a duplicate — see
+  `tests/migration-apply-required.test.ts`. Board versions and their opinions are
   still appended: the version history is the record, and only the newest version
   is `published`.
 - Domain writes are applied as a single atomic `D1.batch`. A failure publishes
